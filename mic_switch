@@ -1,0 +1,71 @@
+#!/bin/bash
+# This is comment
+
+if [ "$2" == "off" ]
+then
+	mic_device_file=$1
+	echo "mic_device_file = $mic_device_file"
+	mic_device_file_new=${mic_device_file}"_off"
+	echo "mic_device_file_new = $mic_device_file_new"
+	echo "Проверка устройств (должно быть несколько): "
+	pacmd list-sources | grep -e 'index:' -e device.string -e 'name:'
+
+	str_1=$(lsof -f -- /dev/snd/$mic_device_file | egrep -o "^[[:alnum:]]+\s[[:digit:]]+\s[[:alnum:]]+\s")
+	echo "str_1 = $str_1"
+	pids=($(echo $str_1 | egrep -o "[[:digit:]]+\s"))
+	echo "pids: "
+
+	for index in ${!pids[*]}
+	do
+    	printf "%4d: %s\n" $index ${pids[$index]}
+	done
+
+	for pid in ${pids[*]}
+	do
+		echo "pid_current = $pid"
+		str_2=$(ls -lah /proc/$pid/fd/ | grep "/dev/snd/$mic_device_file")
+		echo "str_2 = $str_2"
+		str_3=$(echo $str_2 | egrep -o "[[:digit:]]+:[[:digit:]]+\s[[:digit:]]+\s->")
+		echo "str_3 = $str_3"
+		fd_number=$(echo $str_3 | egrep -o "\s[[:digit:]]+" | egrep -o "[[:digit:]]+")
+		echo "fd_number = $fd_number"
+		sudo gdb -p $pid <<< "p close($fd_number)"
+		kill $pid	
+		#kill -TERM $pid
+	done
+	
+	sudo mv /dev/snd/$mic_device_file /dev/snd/$mic_device_file_new
+	str_4=$(lsof -f -- /dev/snd/$mic_device_file_new | egrep -o "^[[:alnum:]]+\s[[:digit:]]+\s[[:alnum:]]+\s")
+	echo "Какие процессы работают с файлом теперь = $str_4"
+	echo "Если пусто - значит все хорошо"
+
+	echo "Проверка устройств (их не должно быть, кроме name: <auto_null.monitor>): "
+	pacmd list-sources | grep -e 'index:' -e device.string -e 'name:'
+	echo "Микрофон выключен"
+	echo "Для включения микрофона выполните команду: $ mic_switch <MICfilename> on"	
+	exit 0
+fi
+
+if [ "$2" == "on" ]
+then
+	mic_device_file=$1
+	echo "mic_device_file = $mic_device_file"
+	mic_device_file_new=${mic_device_file}"_off"
+	echo "mic_device_file_new = $mic_device_file_new"
+	sudo mv /dev/snd/$mic_device_file_new /dev/snd/$mic_device_file
+	pulseaudio -k && sudo alsa force-reload
+	echo "Проверка устройств (должно быть несколько): "
+	pacmd list-sources | grep -e 'index:' -e device.string -e 'name:'
+	echo "Микрофон включен"
+	echo "Для включения микрофона выполните команду: $ mic_switch <MICfilename> off"		
+	exit 0
+fi
+
+echo "Wrong using mic_switch."
+echo "Used mic_switch <mic_device_filename> <on>|<off>."
+echo "Для определения имени файла (в данном случае 'pcmC1D0c') необходимо выполнить: "
+echo "$ cd /dev/snd/"
+echo "И на все файлы pcm* пробовать следующее:"
+echo "$ sudo cat pcm*"
+echo "Тот файл, который не выведет ошибку, а будет в режиме ожидания (так будет если Audacity запущено), или же напишет 'Файл дескриптора находится в плохом состоянии' и есть необходимый Вам файл"
+exit 1
